@@ -1,69 +1,206 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>IDF Curves</title>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>IDF Curves</title>
+
+  <!-- Bootstrap CSS -->
+  <link
+    rel="stylesheet"
+    href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css"
+  />
+
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+  <style>
+    /* Custom styling (optional) */
+    body {
+      background-color: #f8f9fa;
+    }
+    .navbar-brand {
+      font-weight: bold;
+    }
+    .chart-container {
+      position: relative;
+      height: 400px;
+      margin-top: 20px;
+    }
+    select[multiple] {
+      width: 100%;
+      min-height: 150px;
+    }
+  </style>
 </head>
 <body>
-    <h2>Intensity-Duration-Frequency (IDF) Curves</h2>
-    <input type="file" id="fileInput" />
-    <canvas id="idfChart"></canvas>
 
-    <script>
-        document.getElementById('fileInput').addEventListener('change', function(event) {
-            const file = event.target.files[0];
-            if (file) {
-                const reader = new FileReader();
-                reader.onload = function(e) {
-                    const text = e.target.result;
-                    processCSV(text);
-                };
-                reader.readAsText(file);
+  <!-- Navbar -->
+  <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
+    <div class="container-fluid">
+      <a class="navbar-brand" href="#">IDF Curves</a>
+    </div>
+  </nav>
+
+  <!-- Main Content Container -->
+  <div class="container my-4">
+
+    <!-- Header / Instructions -->
+    <div class="row">
+      <div class="col">
+        <h2 class="my-3">Intensity-Duration-Frequency (IDF) Curves</h2>
+        <p class="text-muted">
+          Upload a CSV file that contains columns for <strong>ReturnPeriod</strong>,
+          <strong>Duration (minutes)</strong>, and <strong>Intensity (mm/h)</strong>.
+          Then select which Return Periods you want to display.
+        </p>
+      </div>
+    </div>
+
+    <!-- Upload & Options -->
+    <div class="row g-3">
+      <!-- CSV Upload -->
+      <div class="col-md-4">
+        <label for="fileInput" class="form-label fw-bold">Upload CSV File:</label>
+        <input type="file" class="form-control" id="fileInput" />
+
+        <hr/>
+
+        <!-- Multi-select for Return Periods -->
+        <label for="rpSelect" class="form-label fw-bold">Select Return Periods (Years):</label>
+        <select id="rpSelect" multiple class="form-select"></select>
+      </div>
+
+      <!-- Chart -->
+      <div class="col-md-8">
+        <div class="chart-container">
+          <canvas id="idfChart"></canvas>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Bootstrap JS (Optional for advanced components, not strictly required for this example) -->
+  <script
+    src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js">
+  </script>
+
+  <script>
+    let allIDFData = {};  // To hold the full dataset from the CSV
+    let idfChart = null;  // Reference to our Chart.js instance
+
+    // Handle file upload
+    document.getElementById('fileInput').addEventListener('change', function(event) {
+      const file = event.target.files[0];
+      if (file) {
+        const reader = new FileReader();
+        reader.onload = function(e) {
+          const text = e.target.result;
+          processCSV(text);
+        };
+        reader.readAsText(file);
+      }
+    });
+
+    // Parse CSV text
+    function processCSV(csvText) {
+      const lines = csvText.split("\n").filter(Boolean); // remove any empty lines
+      // Assumes CSV columns: [ReturnPeriod, Duration, Intensity]
+      // First line is the header, so skip it
+      const data = lines.slice(1).map(line => line.split(","));
+
+      // Extract unique durations and return periods
+      const durations = [...new Set(data.map(row => parseInt(row[1])))]
+        .sort((a, b) => a - b);
+      const returnPeriods = [...new Set(data.map(row => parseInt(row[0])))]
+        .sort((a, b) => a - b);
+
+      // Prepare structure to hold intensities by Return Period
+      allIDFData = {};
+      returnPeriods.forEach(rp => (allIDFData[rp] = []));
+
+      data.forEach(row => {
+        const rp = parseInt(row[0]);
+        const duration = parseInt(row[1]);
+        const intensity = parseFloat(row[2]);
+        allIDFData[rp].push({ x: duration, y: intensity });
+      });
+
+      // Populate the multi-select with Return Periods
+      populateRPSelect(returnPeriods);
+
+      // Plot all return periods by default
+      plotIDF(getSelectedReturnPeriods());
+    }
+
+    // Populate the Return Period selection box
+    function populateRPSelect(returnPeriods) {
+      const rpSelect = document.getElementById('rpSelect');
+      rpSelect.innerHTML = ''; // clear old options
+
+      returnPeriods.forEach(rp => {
+        const option = document.createElement('option');
+        option.value = rp;
+        option.textContent = `RP ${rp} years`;
+        option.selected = true; // by default select all
+        rpSelect.appendChild(option);
+      });
+
+      // When user changes selection, update the chart
+      rpSelect.addEventListener('change', () => {
+        plotIDF(getSelectedReturnPeriods());
+      });
+    }
+
+    // Get selected Return Periods from the multi-select
+    function getSelectedReturnPeriods() {
+      const rpSelect = document.getElementById('rpSelect');
+      return Array.from(rpSelect.selectedOptions).map(opt => parseInt(opt.value));
+    }
+
+    // Plot the selected Return Periods
+    function plotIDF(selectedRPs) {
+      // Build datasets for the chosen return periods
+      const datasets = selectedRPs.map(rp => {
+        // Sort by duration in ascending order
+        const sortedData = [...allIDFData[rp]].sort((a, b) => a.x - b.x);
+        return {
+          label: `RP ${rp} years`,
+          data: sortedData,
+          borderColor: `hsl(${Math.random() * 360}, 70%, 50%)`,
+          fill: false
+        };
+      });
+
+      // If a chart instance already exists, destroy it before creating a new one
+      if (idfChart) {
+        idfChart.destroy();
+      }
+
+      const ctx = document.getElementById('idfChart').getContext('2d');
+      idfChart = new Chart(ctx, {
+        type: 'line',
+        data: { datasets },
+        options: {
+          scales: {
+            x: {
+              type: 'logarithmic',
+              title: {
+                display: true,
+                text: 'Duration (minutes)'
+              }
+            },
+            y: {
+              type: 'logarithmic',
+              title: {
+                display: true,
+                text: 'Rainfall Intensity (mm/h)'
+              }
             }
-        });
-
-        function processCSV(csvText) {
-            const lines = csvText.split("\n");
-            const data = lines.slice(1).map(line => line.split(","));
-            
-            const durations = [...new Set(data.map(row => parseInt(row[1])))].sort((a, b) => a - b);
-            const returnPeriods = [...new Set(data.map(row => parseInt(row[0])))].sort((a, b) => a - b);
-
-            const idfData = {};
-            returnPeriods.forEach(rp => idfData[rp] = []);
-            
-            data.forEach(row => {
-                const duration = parseInt(row[1]);
-                const rp = parseInt(row[0]);
-                const intensity = parseFloat(row[2]);
-                idfData[rp].push({ x: duration, y: intensity });
-            });
-
-            plotIDF(idfData);
+          }
         }
-
-        function plotIDF(idfData) {
-            const ctx = document.getElementById('idfChart').getContext('2d');
-            const datasets = Object.keys(idfData).map(rp => ({
-                label: `RP ${rp} years`,
-                data: idfData[rp].sort((a, b) => a.x - b.x),
-                borderColor: `hsl(${Math.random() * 360}, 70%, 50%)`,
-                fill: false,
-            }));
-
-            new Chart(ctx, {
-                type: 'line',
-                data: { datasets },
-                options: {
-                    scales: {
-                        x: { type: 'logarithmic', title: { display: true, text: 'Duration (minutes)' } },
-                        y: { type: 'logarithmic', title: { display: true, text: 'Rainfall Intensity (mm/h)' } }
-                    }
-                }
-            });
-        }
-    </script>
+      });
+    }
+  </script>
 </body>
 </html>
